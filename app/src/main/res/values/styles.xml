@@ -1,10 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.Jarvis" parent="Theme.MaterialComponents.DayNight.DarkActionBar">
-        <item name="colorPrimary">@color/colorPrimary</item>
-        <item name="colorPrimaryContainer">@color/colorPrimaryContainer</item>
-        <item name="colorOnPrimary">@color/colorOnPrimary</item>
-        <item name="colorSecondary">@color/colorSecondary</item>
-        <item name="colorSecondaryContainer">@color/colorSecondaryContainer</item>
-        <item name="colorOnSecondary">@color/colorOnSecondary</item>
+    <style name="Theme.Jarvis" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/jarvis_primary</item>
+        <item name="colorOnPrimary">@color/jarvis_on_primary</item>
+        <item name="colorPrimaryContainer">@color/jarvis_primary_container</item>
+        <item name="colorOnPrimaryContainer">@color/jarvis_on_primary_container</item>
+        <item name="colorSecondary">@color/jarvis_secondary</item>
+        <item name="colorOnSecondary">@color/jarvis_on_primary</item>
+        <item name="android:colorBackground">@color/jarvis_background</item>
+        <item name="colorSurface">@color/jarvis_surface</item>
+        <item name="colorOnSurface">@color/jarvis_text</item>
+        <item name="colorOnSurfaceVariant">@color/jarvis_text_muted</item>
+        <item name="android:statusBarColor">@color/jarvis_background</item>
+        <item name="android:navigationBarColor">@color/jarvis_background</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowBackground">@color/jarvis_background</item>
     </style>
 </resources>
