@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Jarvis</string>
+    <string name="btn_ouvir">Ouvir</string>
+    <string name="txt_status">Aguardando “Jarvis”…</string>
+    <string name="notif_title">Jarvis – ouvindo…</string>
+    <string name="notif_text">Diga ‘Jarvis’ + comando</string>
+    <string name="btn_stop">Interromper</string>
+    <!-- Comandos de exemplo -->
+    <string name="comando_abrir_spotify">Abrir Spotify</string>
+    <string name="comando_abrir_whatsapp">Abrir WhatsApp</string>
+    <string name="comando_abrir_chrome">Abrir Chrome</string>
+    <string name="comando_definir_timer">Definir timer</string>
+    <string name="comando_tempo">Previsão do tempo</string>
+</resources>
