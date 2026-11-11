@@ -7,13 +7,19 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.PowerManager
+import android.provider.Settings
 import android.speech.RecognitionListener
 import android.speech.SpeechRecognizer
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.core.view.isVisible
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.zmove.jarvis.databinding.ActivityMainBinding
+import com.zmove.jarvis.databinding.DialogAccessKeyBinding
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -22,14 +28,17 @@ class MainActivity : AppCompatActivity() {
 
     private companion object {
         const val WAKE_WORD_MIC_DELAY_MS = 700L
+        const val PICOVOICE_CONSOLE_URL = "https://console.picovoice.ai/"
     }
 
     private lateinit var binding: ActivityMainBinding
+    private lateinit var preferences: WakeWordPreferences
     private val commandProcessor = CommandProcessor()
 
     private var speechRecognizer: SpeechRecognizer? = null
     private var isListening = false
     private var pendingAction: (() -> Unit)? = null
+    private var updatingSwitch = false
 
     private val permissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
@@ -39,6 +48,7 @@ class MainActivity : AppCompatActivity() {
                 action?.invoke()
             } else {
                 showStatus(getString(R.string.status_permission_denied))
+                syncAlwaysListeningSwitch()
             }
         }
 
@@ -47,8 +57,16 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
+        preferences = WakeWordPreferences(this)
+
         binding.btnOuvir.setOnClickListener { requestPermissionsThenListen() }
-        binding.btnServico.setOnClickListener { startContinuousListening() }
+        binding.switchSempre.setOnCheckedChangeListener { _, checked ->
+            onAlwaysListeningChanged(checked)
+        }
+        binding.btnAccessKey.setOnClickListener { showAccessKeyDialog(startAfterSave = false) }
+        binding.btnBattery.setOnClickListener { requestBatteryOptimizationExemption() }
+
+        syncAlwaysListeningSwitch()
 
         if (intent?.getBooleanExtra(JarvisService.EXTRA_WAKE_WORD, false) == true) {
             binding.root.postDelayed({ requestPermissionsThenListen() }, WAKE_WORD_MIC_DELAY_MS)
@@ -63,6 +81,11 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        syncAlwaysListeningSwitch()
+    }
+
     override fun onStop() {
         stopListening()
         super.onStop()
@@ -74,18 +97,124 @@ class MainActivity : AppCompatActivity() {
         super.onDestroy()
     }
 
-    private fun requestPermissionsThenListen() {
-        withAudioPermission { startListeningSafely() }
+    private fun onAlwaysListeningChanged(checked: Boolean) {
+        if (updatingSwitch) return
+
+        if (!checked) {
+            stopAlwaysListening()
+            return
+        }
+
+        if (!preferences.hasAccessKey) {
+            showAccessKeyDialog(startAfterSave = true)
+            return
+        }
+
+        withAudioPermission { startAlwaysListening() }
     }
 
-    private fun startContinuousListening() {
-        withAudioPermission {
-            stopListening()
-            val serviceIntent = Intent(this, JarvisService::class.java)
+    private fun startAlwaysListening() {
+        preferences.alwaysListening = true
+        val intent = Intent(this, JarvisService::class.java)
+            .setAction(JarvisService.ACTION_START)
+        ContextCompat.startForegroundService(this, intent)
+        syncAlwaysListeningSwitch()
+        showStatus(getString(R.string.status_always_on))
+    }
+
+    private fun stopAlwaysListening() {
+        preferences.alwaysListening = false
+        stopService(Intent(this, JarvisService::class.java))
+        syncAlwaysListeningSwitch()
+        showStatus(getString(R.string.status_always_off))
+    }
+
+    private fun restartAlwaysListening() {
+        if (!preferences.alwaysListening) return
+        stopService(Intent(this, JarvisService::class.java))
+        binding.root.postDelayed({
+            if (!preferences.alwaysListening) return@postDelayed
+            val intent = Intent(this, JarvisService::class.java)
                 .setAction(JarvisService.ACTION_START)
-            ContextCompat.startForegroundService(this, serviceIntent)
-            showStatus(getString(R.string.status_service_started))
+            ContextCompat.startForegroundService(this, intent)
+        }, 400L)
+    }
+
+    private fun syncAlwaysListeningSwitch() {
+        updatingSwitch = true
+        binding.switchSempre.isChecked = preferences.alwaysListening
+        updatingSwitch = false
+
+        binding.btnBattery.isVisible = preferences.alwaysListening
+        binding.txtWakeWordMode.text = when {
+            !preferences.alwaysListening -> getString(R.string.wake_word_mode_off)
+            preferences.hasAccessKey -> getString(R.string.wake_word_mode_porcupine)
+            else -> getString(R.string.wake_word_mode_fallback)
         }
+    }
+
+    private fun showAccessKeyDialog(startAfterSave: Boolean) {
+        val dialogBinding = DialogAccessKeyBinding.inflate(layoutInflater)
+        dialogBinding.editAccessKey.setText(preferences.accessKey)
+        dialogBinding.txtAccessKeyHelp.setOnClickListener { openUrl(PICOVOICE_CONSOLE_URL) }
+
+        val dialog = MaterialAlertDialogBuilder(this)
+            .setTitle(R.string.access_key_dialog_title)
+            .setView(dialogBinding.root)
+            .setPositiveButton(R.string.save, null)
+            .setNegativeButton(R.string.cancel, null)
+            .create()
+
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val key = dialogBinding.editAccessKey.text?.toString()?.trim().orEmpty()
+                if (key.isBlank()) {
+                    dialogBinding.inputAccessKey.error = getString(R.string.access_key_required)
+                    return@setOnClickListener
+                }
+
+                dialogBinding.inputAccessKey.error = null
+                preferences.accessKey = key
+                dialog.dismiss()
+                Toast.makeText(this, R.string.access_key_saved, Toast.LENGTH_SHORT).show()
+
+                when {
+                    startAfterSave -> withAudioPermission { startAlwaysListening() }
+                    preferences.alwaysListening -> restartAlwaysListening()
+                }
+            }
+        }
+
+        dialog.setOnDismissListener {
+            if (startAfterSave && !preferences.alwaysListening) {
+                syncAlwaysListeningSwitch()
+            }
+        }
+
+        dialog.show()
+    }
+
+    private fun requestBatteryOptimizationExemption() {
+        val powerManager = getSystemService(PowerManager::class.java)
+        if (powerManager?.isIgnoringBatteryOptimizations(packageName) == true) {
+            Toast.makeText(this, R.string.battery_already_exempt, Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        try {
+            startActivity(
+                Intent(
+                    Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                    Uri.parse("package:$packageName")
+                )
+            )
+        } catch (_: ActivityNotFoundException) {
+            startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+        }
+    }
+
+    private fun requestPermissionsThenListen() {
+        withAudioPermission { startListeningSafely() }
     }
 
     private fun withAudioPermission(action: () -> Unit) {
@@ -125,6 +254,8 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        pauseAlwaysListeningForCommand()
+
         isListening = true
         setListeningUi(true)
         showStatus(getString(R.string.status_listening))
@@ -133,9 +264,27 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun stopListening() {
+        val wasListening = isListening
         isListening = false
         setListeningUi(false)
         speechRecognizer?.cancel()
+        if (wasListening) {
+            resumeAlwaysListeningAfterCommand()
+        }
+    }
+
+    private fun pauseAlwaysListeningForCommand() {
+        if (!preferences.alwaysListening) return
+        startService(
+            Intent(this, JarvisService::class.java).setAction(JarvisService.ACTION_PAUSE)
+        )
+    }
+
+    private fun resumeAlwaysListeningAfterCommand() {
+        if (!preferences.alwaysListening) return
+        startService(
+            Intent(this, JarvisService::class.java).setAction(JarvisService.ACTION_RESUME)
+        )
     }
 
     private fun setListeningUi(listening: Boolean) {
@@ -227,6 +376,7 @@ class MainActivity : AppCompatActivity() {
             isListening = false
             setListeningUi(false)
             showStatus(errorMessage(error))
+            resumeAlwaysListeningAfterCommand()
         }
 
         override fun onResults(results: Bundle?) {
@@ -243,6 +393,8 @@ class MainActivity : AppCompatActivity() {
             } else {
                 handleTranscript(transcript)
             }
+
+            resumeAlwaysListeningAfterCommand()
         }
 
         override fun onPartialResults(partialResults: Bundle?) {

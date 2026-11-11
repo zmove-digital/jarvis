@@ -8,24 +8,20 @@ import android.app.Service
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
-import android.os.Bundle
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
-import android.speech.RecognitionListener
-import android.speech.SpeechRecognizer
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 
 /**
- * Serviço de escuta contínua: mantém o microfone ativo em foreground e espera
- * pela palavra de ativação "Jarvis". Ao detectá-la, abre a [MainActivity] para
- * capturar o comando e encerra a escuta para liberar o microfone.
+ * Escuta em tempo integral em foreground.
  *
- * Observação: o Android pode bloquear a abertura de atividades a partir do
- * segundo plano. Quando isso acontece, o usuário ainda pode tocar na notificação
- * fixa para abrir o assistente.
+ * Usa o Porcupine (wake word local) quando há uma Access Key configurada e cai
+ * para o reconhecedor do sistema caso contrário. Ao detectar "Jarvis", pausa a
+ * escuta, abre a [MainActivity] para capturar o comando e retoma automaticamente
+ * depois — a tela avisa o serviço quando terminar de ouvir.
  */
 class JarvisService : Service() {
 
@@ -33,23 +29,28 @@ class JarvisService : Service() {
         private const val TAG = "JarvisService"
         private const val CHANNEL_ID = "jarvis.listening"
         private const val NOTIFICATION_ID = 1001
-        private const val RESTART_DELAY_MS = 500L
+        private const val AUTO_RESUME_DELAY_MS = 30_000L
 
         const val ACTION_START = "com.zmove.jarvis.action.START"
         const val ACTION_STOP = "com.zmove.jarvis.action.STOP"
+        const val ACTION_PAUSE = "com.zmove.jarvis.action.PAUSE"
+        const val ACTION_RESUME = "com.zmove.jarvis.action.RESUME"
         const val EXTRA_WAKE_WORD = "extra_wake_word"
         const val EXTRA_TRANSCRIPT = "extra_transcript"
     }
 
     private val handler = Handler(Looper.getMainLooper())
-    private var speechRecognizer: SpeechRecognizer? = null
-    private var active = false
-    private var isRecognizing = false
+    private lateinit var preferences: WakeWordPreferences
 
-    private val restartListening = Runnable { startListening() }
+    private var engine: WakeWordEngine? = null
+    private var paused = false
+    private var wakeInProgress = false
+
+    private val autoResume = Runnable { resumeListening() }
 
     override fun onCreate() {
         super.onCreate()
+        preferences = WakeWordPreferences(this)
         createNotificationChannel()
         ServiceCompat.startForeground(
             this,
@@ -64,66 +65,82 @@ class JarvisService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == ACTION_STOP) {
-            stopSelf()
-            return START_NOT_STICKY
-        }
+        when (intent?.action) {
+            ACTION_STOP -> {
+                preferences.alwaysListening = false
+                stopSelf()
+                return START_NOT_STICKY
+            }
 
-        startListening()
+            ACTION_PAUSE -> pauseListening()
+
+            ACTION_RESUME -> resumeListening()
+
+            else -> {
+                preferences.alwaysListening = true
+                startListening()
+            }
+        }
         return START_STICKY
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
-        active = false
-        isRecognizing = false
         handler.removeCallbacksAndMessages(null)
-        speechRecognizer?.destroy()
-        speechRecognizer = null
+        engine?.release()
+        engine = null
         super.onDestroy()
     }
 
     private fun startListening() {
-        active = true
-        handler.removeCallbacks(restartListening)
-
-        if (isRecognizing) return
-
-        if (!SpeechRecognizer.isRecognitionAvailable(this)) {
-            Log.w(TAG, "Reconhecimento de fala indisponível; encerrando o serviço.")
-            stopSelf()
-            return
+        if (engine == null) {
+            engine = createEngine()
         }
+        paused = false
+        handler.removeCallbacks(autoResume)
+        engine?.start()
+    }
 
-        if (speechRecognizer == null) {
-            speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this).also {
-                it.setRecognitionListener(recognitionListener)
+    private fun createEngine(): WakeWordEngine {
+        val accessKey = preferences.accessKey
+        if (accessKey.isNotBlank()) {
+            try {
+                return PorcupineWakeWordEngine(
+                    context = this,
+                    accessKey = accessKey,
+                    sensitivity = preferences.sensitivity
+                ) { onWakeWordDetected("") }
+            } catch (exception: Exception) {
+                // Access Key inválida ou recurso indisponível: mantém o
+                // assistente funcional com o reconhecedor do sistema.
+                Log.e(TAG, "Falha ao iniciar o Porcupine; usando SpeechRecognizer", exception)
             }
         }
 
-        isRecognizing = true
-        try {
-            speechRecognizer?.startListening(Speech.createRecognizerIntent(partialResults = true))
-        } catch (exception: Exception) {
-            Log.w(TAG, "Falha ao iniciar o reconhecimento", exception)
-            isRecognizing = false
-            scheduleRestart(1_500L)
+        return SpeechWakeWordEngine(this) { transcript ->
+            onWakeWordDetected(transcript)
         }
     }
 
-    private fun scheduleRestart(delayMs: Long = RESTART_DELAY_MS) {
-        if (!active) return
-        handler.removeCallbacks(restartListening)
-        handler.postDelayed(restartListening, delayMs)
+    private fun pauseListening() {
+        paused = true
+        handler.removeCallbacks(autoResume)
+        engine?.pause()
+    }
+
+    private fun resumeListening() {
+        if (!paused) return
+        paused = false
+        wakeInProgress = false
+        handler.removeCallbacks(autoResume)
+        engine?.start()
     }
 
     private fun onWakeWordDetected(transcript: String) {
-        if (!active) return
-        active = false
-        isRecognizing = false
-        handler.removeCallbacksAndMessages(null)
-        speechRecognizer?.cancel()
+        if (wakeInProgress) return
+        wakeInProgress = true
+        pauseListening()
 
         val launchIntent = Intent(this, MainActivity::class.java).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
@@ -134,71 +151,13 @@ class JarvisService : Service() {
         try {
             startActivity(launchIntent)
         } catch (exception: Exception) {
-            // Restrição de início de atividade em segundo plano: a notificação
-            // continua disponível para o usuário abrir o app manualmente.
+            // Android pode bloquear o início de atividades em segundo plano;
+            // a notificação fixa continua disponível para abrir o app.
             Log.w(TAG, "Não foi possível abrir a tela principal", exception)
         }
 
-        stopSelf()
-    }
-
-    private val recognitionListener = object : RecognitionListener {
-        override fun onReadyForSpeech(params: Bundle?) = Unit
-
-        override fun onBeginningOfSpeech() = Unit
-
-        override fun onRmsChanged(rmsdB: Float) = Unit
-
-        override fun onBufferReceived(buffer: ByteArray?) = Unit
-
-        override fun onEndOfSpeech() = Unit
-
-        override fun onError(error: Int) {
-            isRecognizing = false
-            if (!active) return
-
-            when (error) {
-                SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> {
-                    Log.w(TAG, "Permissão de microfone ausente; encerrando o serviço.")
-                    stopSelf()
-                }
-
-                SpeechRecognizer.ERROR_NO_MATCH,
-                SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> scheduleRestart(400L)
-
-                else -> scheduleRestart(1_500L)
-            }
-        }
-
-        override fun onResults(results: Bundle?) {
-            isRecognizing = false
-            if (!active) return
-
-            val transcript = results
-                ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                ?.firstOrNull()
-
-            if (!transcript.isNullOrBlank() && Speech.containsWakeWord(transcript)) {
-                onWakeWordDetected(transcript)
-            } else {
-                scheduleRestart()
-            }
-        }
-
-        override fun onPartialResults(partialResults: Bundle?) {
-            if (!active) return
-
-            val transcript = partialResults
-                ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                ?.firstOrNull()
-                ?: return
-
-            if (Speech.containsWakeWord(transcript)) {
-                onWakeWordDetected(transcript)
-            }
-        }
-
-        override fun onEvent(eventType: Int, params: Bundle?) = Unit
+        // Se a tela não avisar quando terminar, retoma sozinho.
+        handler.postDelayed(autoResume, AUTO_RESUME_DELAY_MS)
     }
 
     private fun createNotificationChannel() {

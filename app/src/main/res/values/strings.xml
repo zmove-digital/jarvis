@@ -7,18 +7,34 @@
     <string name="subtitle">Assistente de voz em português</string>
     <string name="btn_ouvir">Ouvir comando</string>
     <string name="btn_ouvindo">Ouvindo…</string>
-    <string name="btn_servico">Ativar escuta contínua</string>
-    <string name="status_idle">Toque em “Ouvir comando” e fale.</string>
+    <string name="status_idle">Toque em “Ouvir comando” ou diga “Jarvis”.</string>
     <string name="status_listening">Ouvindo…</string>
     <string name="status_processing">Processando…</string>
     <string name="status_no_result">Não consegui entender. Tente novamente.</string>
     <string name="status_permission_denied">Permissão de microfone necessária para ouvir comandos.</string>
-    <string name="status_service_started">Escuta contínua ativada. Diga “Jarvis”.</string>
     <string name="status_service_unavailable">Reconhecimento de voz indisponível neste dispositivo.</string>
     <string name="heard_format">Você disse: “%1$s”</string>
     <string name="heard_empty">—</string>
     <string name="status_heard_partial">Ouvindo: “%1$s”</string>
     <string name="hint">Exemplos: “abrir WhatsApp”, “tocar música”, “timer de 5 minutos”, “pesquisar receita de bolo no YouTube”, “que horas são”.</string>
+
+    <!-- Escuta em tempo integral -->
+    <string name="switch_always">Ouvir em tempo integral</string>
+    <string name="wake_word_mode_off">Escuta em tempo integral desativada.</string>
+    <string name="wake_word_mode_porcupine">Ativo com Porcupine: detecção local, sem enviar áudio para a nuvem.</string>
+    <string name="wake_word_mode_fallback">Ativo com o reconhecedor do Google. Configure a chave Picovoice para o modo local.</string>
+    <string name="btn_access_key">Configurar chave Picovoice</string>
+    <string name="btn_battery">Ignorar otimização de bateria</string>
+    <string name="status_always_on">Escuta em tempo integral ativada. Diga “Jarvis”.</string>
+    <string name="status_always_off">Escuta em tempo integral desativada.</string>
+    <string name="battery_already_exempt">O app já está isento da otimização de bateria.</string>
+    <string name="access_key_dialog_title">Picovoice Access Key</string>
+    <string name="access_key_hint">Access Key</string>
+    <string name="access_key_help">Obtenha uma chave gratuita em console.picovoice.ai. Toque aqui para abrir o console.</string>
+    <string name="access_key_required">Informe a Access Key</string>
+    <string name="access_key_saved">Chave salva</string>
+    <string name="save">Salvar</string>
+    <string name="cancel">Cancelar</string>
 
     <!-- Comandos -->
     <string name="status_opening">Abrindo %1$s…</string>
@@ -41,10 +57,10 @@
     <string name="error_generic">Não foi possível reconhecer a fala (erro %1$d).</string>
 
     <!-- Notificações -->
-    <string name="notif_title">Jarvis está ouvindo</string>
+    <string name="notif_title">Jarvis está sempre ouvindo</string>
     <string name="notif_text">Diga “Jarvis” para ativar o assistente</string>
-    <string name="notif_stop">Parar</string>
-    <string name="channel_listening_name">Escuta contínua</string>
+    <string name="notif_stop">Desativar</string>
+    <string name="channel_listening_name">Escuta em tempo integral</string>
     <string name="channel_listening_description">Mantém o microfone ativo aguardando a palavra “Jarvis”</string>
     <string name="timer_notif_title">Timer do Jarvis</string>
     <string name="timer_notif_text">Seu timer terminou!</string>
