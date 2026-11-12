@@ -11,6 +11,7 @@ import android.os.PowerManager
 import android.provider.Settings
 import android.speech.RecognitionListener
 import android.speech.SpeechRecognizer
+import android.util.Log
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
@@ -27,6 +28,7 @@ import java.util.Locale
 class MainActivity : AppCompatActivity() {
 
     private companion object {
+        const val TAG = "MainActivity"
         const val WAKE_WORD_MIC_DELAY_MS = 700L
         const val PICOVOICE_CONSOLE_URL = "https://console.picovoice.ai/"
     }
@@ -63,7 +65,7 @@ class MainActivity : AppCompatActivity() {
         binding.switchSempre.setOnCheckedChangeListener { _, checked ->
             onAlwaysListeningChanged(checked)
         }
-        binding.btnAccessKey.setOnClickListener { showAccessKeyDialog(startAfterSave = false) }
+        binding.btnEngine.setOnClickListener { showEngineDialog() }
         binding.btnBattery.setOnClickListener { requestBatteryOptimizationExemption() }
 
         syncAlwaysListeningSwitch()
@@ -105,8 +107,8 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        if (!preferences.hasAccessKey) {
-            showAccessKeyDialog(startAfterSave = true)
+        if (preferences.engine == WakeWordEngineType.PORCUPINE && !preferences.hasAccessKey) {
+            showAccessKeyDialog(startAfterSave = true, selectPorcupine = true)
             return
         }
 
@@ -145,15 +147,60 @@ class MainActivity : AppCompatActivity() {
         binding.switchSempre.isChecked = preferences.alwaysListening
         updatingSwitch = false
 
+        val engine = preferences.engine
         binding.btnBattery.isVisible = preferences.alwaysListening
+        binding.btnEngine.text = getString(
+            R.string.engine_button_format,
+            getString(engineLabelRes(engine))
+        )
         binding.txtWakeWordMode.text = when {
             !preferences.alwaysListening -> getString(R.string.wake_word_mode_off)
-            preferences.hasAccessKey -> getString(R.string.wake_word_mode_porcupine)
-            else -> getString(R.string.wake_word_mode_fallback)
+            engine == WakeWordEngineType.SHERPA -> getString(R.string.wake_word_mode_sherpa)
+            engine == WakeWordEngineType.PORCUPINE -> getString(R.string.wake_word_mode_porcupine)
+            else -> getString(R.string.wake_word_mode_speech)
         }
     }
 
-    private fun showAccessKeyDialog(startAfterSave: Boolean) {
+    private fun showEngineDialog() {
+        val engines = WakeWordEngineType.entries
+        val labels = engines.map { getString(engineLabelRes(it)) }.toTypedArray()
+        val selected = engines.indexOf(preferences.engine).coerceAtLeast(0)
+
+        MaterialAlertDialogBuilder(this)
+            .setTitle(R.string.engine_dialog_title)
+            .setMessage(R.string.engine_dialog_message)
+            .setSingleChoiceItems(labels, selected) { dialog, which ->
+                dialog.dismiss()
+                selectEngine(engines[which])
+            }
+            .setNegativeButton(R.string.cancel, null)
+            .show()
+    }
+
+    private fun selectEngine(engine: WakeWordEngineType) {
+        if (engine == WakeWordEngineType.PORCUPINE && !preferences.hasAccessKey) {
+            showAccessKeyDialog(
+                startAfterSave = preferences.alwaysListening,
+                selectPorcupine = true
+            )
+            return
+        }
+
+        preferences.engine = engine
+        if (preferences.alwaysListening) {
+            restartAlwaysListening()
+        }
+        syncAlwaysListeningSwitch()
+        showStatus(getString(R.string.engine_changed, getString(engineLabelRes(engine))))
+    }
+
+    private fun engineLabelRes(engine: WakeWordEngineType): Int = when (engine) {
+        WakeWordEngineType.SHERPA -> R.string.engine_sherpa
+        WakeWordEngineType.PORCUPINE -> R.string.engine_porcupine
+        WakeWordEngineType.SPEECH -> R.string.engine_speech
+    }
+
+    private fun showAccessKeyDialog(startAfterSave: Boolean, selectPorcupine: Boolean = false) {
         val dialogBinding = DialogAccessKeyBinding.inflate(layoutInflater)
         dialogBinding.editAccessKey.setText(preferences.accessKey)
         dialogBinding.txtAccessKeyHelp.setOnClickListener { openUrl(PICOVOICE_CONSOLE_URL) }
@@ -175,12 +222,16 @@ class MainActivity : AppCompatActivity() {
 
                 dialogBinding.inputAccessKey.error = null
                 preferences.accessKey = key
+                if (selectPorcupine) {
+                    preferences.engine = WakeWordEngineType.PORCUPINE
+                }
                 dialog.dismiss()
                 Toast.makeText(this, R.string.access_key_saved, Toast.LENGTH_SHORT).show()
 
                 when {
                     startAfterSave -> withAudioPermission { startAlwaysListening() }
                     preferences.alwaysListening -> restartAlwaysListening()
+                    else -> syncAlwaysListeningSwitch()
                 }
             }
         }

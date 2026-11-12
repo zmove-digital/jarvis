@@ -21,9 +21,17 @@
     <!-- Escuta em tempo integral -->
     <string name="switch_always">Ouvir em tempo integral</string>
     <string name="wake_word_mode_off">Escuta em tempo integral desativada.</string>
+    <string name="wake_word_mode_sherpa">Ativo com Sherpa: detecção local, sem chave e sem enviar áudio para a nuvem.</string>
     <string name="wake_word_mode_porcupine">Ativo com Porcupine: detecção local, sem enviar áudio para a nuvem.</string>
-    <string name="wake_word_mode_fallback">Ativo com o reconhecedor do Google. Configure a chave Picovoice para o modo local.</string>
-    <string name="btn_access_key">Configurar chave Picovoice</string>
+    <string name="wake_word_mode_speech">Ativo com o reconhecedor do Google (online).</string>
+    <string name="btn_engine">Motor de escuta</string>
+    <string name="engine_button_format">Motor de escuta: %1$s</string>
+    <string name="engine_dialog_title">Motor de escuta</string>
+    <string name="engine_dialog_message">Sherpa é offline e não exige chave. Porcupine também é offline, mas requer uma Access Key gratuita. Google usa a rede e consome mais bateria.</string>
+    <string name="engine_sherpa">Sherpa (offline, sem chave)</string>
+    <string name="engine_porcupine">Porcupine (requer chave)</string>
+    <string name="engine_speech">Google (online)</string>
+    <string name="engine_changed">Motor de escuta: %1$s.</string>
     <string name="btn_battery">Ignorar otimização de bateria</string>
     <string name="status_always_on">Escuta em tempo integral ativada. Diga “Jarvis”.</string>
     <string name="status_always_off">Escuta em tempo integral desativada.</string>

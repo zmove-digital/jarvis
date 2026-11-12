@@ -18,10 +18,11 @@ import androidx.core.app.ServiceCompat
 /**
  * Escuta em tempo integral em foreground.
  *
- * Usa o Porcupine (wake word local) quando há uma Access Key configurada e cai
- * para o reconhecedor do sistema caso contrário. Ao detectar "Jarvis", pausa a
- * escuta, abre a [MainActivity] para capturar o comando e retoma automaticamente
- * depois — a tela avisa o serviço quando terminar de ouvir.
+ * O motor padrão é o [SherpaWakeWordEngine]: detecção local de "Jarvis" sem
+ * chave e sem enviar áudio para a nuvem. O usuário também pode escolher o
+ * Porcupine (requer Access Key) ou o reconhecedor do Google. Ao detectar a
+ * palavra, pausa a escuta, abre a [MainActivity] para capturar o comando e
+ * retoma automaticamente depois — a tela avisa o serviço quando terminar.
  */
 class JarvisService : Service() {
 
@@ -45,6 +46,7 @@ class JarvisService : Service() {
     private var engine: WakeWordEngine? = null
     private var paused = false
     private var wakeInProgress = false
+    private var destroyed = false
 
     private val autoResume = Runnable { resumeListening() }
 
@@ -87,6 +89,7 @@ class JarvisService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
+        destroyed = true
         handler.removeCallbacksAndMessages(null)
         engine?.release()
         engine = null
@@ -102,25 +105,50 @@ class JarvisService : Service() {
         engine?.start()
     }
 
-    private fun createEngine(): WakeWordEngine {
+    private fun createEngine(): WakeWordEngine = when (preferences.engine) {
+        WakeWordEngineType.SHERPA -> createSherpaEngine()
+        WakeWordEngineType.PORCUPINE -> createPorcupineEngine() ?: createSpeechEngine()
+        WakeWordEngineType.SPEECH -> createSpeechEngine()
+    }
+
+    private fun createSherpaEngine(): WakeWordEngine = SherpaWakeWordEngine(
+        context = this,
+        onDetected = { keyword -> handler.post { onWakeWordDetected(keyword) } },
+        onError = { error -> handler.post { fallbackToSpeech(error) } }
+    )
+
+    private fun createPorcupineEngine(): WakeWordEngine? {
         val accessKey = preferences.accessKey
-        if (accessKey.isNotBlank()) {
-            try {
-                return PorcupineWakeWordEngine(
-                    context = this,
-                    accessKey = accessKey,
-                    sensitivity = preferences.sensitivity
-                ) { onWakeWordDetected("") }
-            } catch (exception: Exception) {
-                // Access Key inválida ou recurso indisponível: mantém o
-                // assistente funcional com o reconhecedor do sistema.
-                Log.e(TAG, "Falha ao iniciar o Porcupine; usando SpeechRecognizer", exception)
-            }
+        if (accessKey.isBlank()) return null
+
+        return try {
+            PorcupineWakeWordEngine(
+                context = this,
+                accessKey = accessKey,
+                sensitivity = preferences.sensitivity
+            ) { handler.post { onWakeWordDetected("") } }
+        } catch (exception: Exception) {
+            Log.e(TAG, "Falha ao iniciar o Porcupine", exception)
+            null
+        }
+    }
+
+    private fun createSpeechEngine(): WakeWordEngine =
+        SpeechWakeWordEngine(this) { transcript ->
+            handler.post { onWakeWordDetected(transcript) }
         }
 
-        return SpeechWakeWordEngine(this) { transcript ->
-            onWakeWordDetected(transcript)
-        }
+    /**
+     * Se o modelo offline não puder ser carregado, mantém o assistente
+     * funcional com o reconhecedor do sistema em vez de ficar surdo.
+     */
+    private fun fallbackToSpeech(error: Throwable) {
+        if (destroyed || paused || preferences.engine != WakeWordEngineType.SHERPA) return
+
+        Log.e(TAG, "Sherpa indisponível; usando o reconhecedor do Google", error)
+        engine?.release()
+        engine = createSpeechEngine()
+        engine?.start()
     }
 
     private fun pauseListening() {
